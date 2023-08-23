@@ -3,7 +3,7 @@
 set -e
 
 ### CONFIG
-PROXYDIR="./.vido-parts"
+PROXY_DIR="./.vido-parts"
 CLUT=
 STAB=
 FILTER_BEFORE=
@@ -12,10 +12,10 @@ PROXY_MUX_PARAMS=(-c:v dnxhd -profile:v dnxhr_hq -c:a pcm_s16le)
 CONCURRENCY=4
 
 ### START
-rm "$PROXYDIR/"*".tmp" 2>/dev/null || :
+rm "$PROXY_DIR/"*".tmp" 2>/dev/null || :
 parts=()
 nw_files=()
-ex_files=("$PROXYDIR/part-"*)
+ex_files=("$PROXY_DIR/part-"*)
 
 processes=0
 
@@ -26,7 +26,6 @@ while read -r line; do
         continue
     fi
 
-    echo
     if echo "$line" | grep -E '^\s*[_a-zA-Z0-9]+=' &>/dev/null; then
         printf 'Assigning %s\n' "$(echo "$line" | cut -d= -f1)"
         eval "$line"
@@ -34,7 +33,7 @@ while read -r line; do
     fi
 
     lbl=$(( lbl + 1 ))
-    mkdir "$PROXYDIR" 2>/dev/null || :
+    mkdir "$PROXY_DIR" 2>/dev/null || :
     part="$(echo "$line" | grep -Eo '^.*[0-9_:\.]+-[0-9_:\.]+')"
     usrf="$( echo "${line:${#part}}" | sed  -E 's/(^\s*)|(\s*$)//g')"
     file="$(echo "$part" | rev | cut -d' ' -f2- | rev)"
@@ -51,36 +50,39 @@ while read -r line; do
     fi
     prefix+=(-i "$file")
 
-    # outfile_prefix="$(printf '%s/%03d-' "$PROXYDIR" $lbl)"
-    outfile_prefix="$(printf '%s/part-' "$PROXYDIR")"
+    # outfile_prefix="$(printf '%s/%03d-' "$PROXY_DIR" $lbl)"
+    outfile_prefix="$(printf '%s/part-' "$PROXY_DIR")"
 
     hash_stab="$(echo "${prefix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_stab="$(printf '%s%s.stab' "$outfile_prefix" "$hash_stab")"
 
-    filters=""
-    if [ "$STAB" != "" ]; then
-        filters="${filters},[main]vidstabtransform=$STAB:input=${outfile_stab}[main],[main]unsharp=5:5:0.8:3:3:0.4[main]"
-    fi
-    if [ "$CLUT" != "" ]; then
-        filters="${filters},[main][1]haldclut=interp=nearest[main]"
+    filters=()
+    if [ "$FILTER_BEFORE" != "" ]; then
+        filters+=("[main]${FILTER_BEFORE}[main]")
     fi
     if [ "$usrf" != "" ]; then
-        filters="[main]${usrf}[main],${filters}"
+        filters+=("[main]${usrf}[main]")
     fi
-    if [ "$FILTER_BEFORE" != "" ]; then
-        filters="[main]${FILTER_BEFORE}[main],${filters}"
+    if [ "$STAB" != "" ]; then
+        filters+=("[main]vidstabtransform=$STAB:input=${outfile_stab}" "unsharp=5:5:0.8:3:3:0.4[main]")
+    fi
+    if [ "$CLUT" != "" ]; then
+        # TODO trilinear
+        filters+=("[main][1]haldclut=interp=nearest[main]")
     fi
     if [ "$FILTER_AFTER" != "" ]; then
-        filters="${filters},[main]${FILTER_AFTER}[main]"
+        filters+=("[main]${FILTER_AFTER}[main]")
     fi
-    filters="${filters},[main]format=yuv420p[main]"
-    filters="$(echo "$filters" | sed 's/^,//' | sed 's/,\+/,/g' | sed 's/\[main\]/[0]/')"
+    filters+=("[main]format=yuv420p[main]")
+
+    if [ ${#filters[@]} != 0 ]; then
+        filters[0]="$(echo "${filters[0]}" | sed 's/\[main\]/[0]/')"
+    fi
+    filter_str="$(IFS=,; echo "${filters[*]}")"
 
     suffix=("${PROXY_MUX_PARAMS[@]}" -map '[main]' -map '0:a')
-    hash_main="$(echo "${prefix[*]} $CLUT $filters ${suffix[*]}" | sha1sum - | cut -d' ' -f1)"
+    hash_main="$(echo "${prefix[*]} $CLUT $filter_str ${suffix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_main="$(printf '%s%s.mov'  "$outfile_prefix" "$hash_main")"
-    echo "TODO '$filters'"
-    exit
 
     while [[ processes -ge CONCURRENCY ]]; do
         wait -n
@@ -107,7 +109,7 @@ while read -r line; do
 
             "${prefix[@]}" \
                 -stats \
-                -filter_complex "$filters" \
+                -filter_complex "$filter_str" \
                 "${suffix[@]}" \
                 -f mov \
                 "$tmp" <&- && \
@@ -124,6 +126,9 @@ done < Timeline
 wait
 
 for ex in "${ex_files[@]}"; do
+    if [ ! -f "$ex" ]; then
+        continue
+    fi
     found=0
     for n in "${nw_files[@]}"; do
         if [ "$n" == "$ex" ]; then
@@ -149,7 +154,7 @@ for file in "${parts[@]}"; do
     lbl=$(( lbl + 1 ))
 done
 filter="${filter}concat=n=${lbl}:v=1:a=1[v][a]"
-cmd+=(-filter_complex "$filter" -map '[v]' -map '[a]' -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 32)
+cmd+=(-filter_complex "$filter" -map '[v]' -map '[a]' -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 24)
 
 for p in "${cmd[@]}"; do
     echo -n "$p "
