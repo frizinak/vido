@@ -1,25 +1,83 @@
 #! /bin/bash
-
 set -e
 
-### CONFIG
+
+usage () {
+    echo "Usage: $(basename "$0") [-c] <timeline-file>"
+    echo "    -c: remove old proxy files"
+    # echo "    -n: shows you how to normalize a file"
+}
+
+################################################################################
+
 PROXY_DIR="./.vido-parts"
 CLUT=
 STAB=
 FILTER_BEFORE=
 FILTER_AFTER=
+FFMPEG=(ffmpeg -hide_banner -nostdin -loglevel warning -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
+# PROXY_MUX_PARAMS=(-c:v hevc_nvenc -b_ref_mode 0 -preset:v lossless -tune lossless -c:a pcm_s16le)
 PROXY_MUX_PARAMS=(-c:v dnxhd -profile:v dnxhr_hq -c:a pcm_s16le)
-CONCURRENCY=4
+CONCURRENCY=${CONCURRENCY:-4}
+SECTION=
 
-### START
+################################################################################
+
+clean=0
+while getopts ':ch' o; do
+    case "$o" in
+        c)
+            clean=1
+            ;;
+        # n)
+        #     fn="$OPTARG"
+        #     base="$(basename "$OPTARG" | rev | cut -d. -f2- | rev)"
+        #     echo "${FFMPEG[*]} -i $fn -f lavfi -i anullsrc=cl=mono -f lavfi -i nullsrc=size=256x120 -c:a pcm_s16le -pix_fmt yuv420p -shortest -c:v hevc_nvenc -b_ref_mode 0 -cq 12 -preset:v slow  proxy-$base.mov";
+        #     exit 0
+        #     ;;
+        h)
+            usage;
+            exit 0
+            ;;
+        ?)
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+shift "$((OPTIND -1))"
+
+################################################################################
+
+PROXY_DIR="./.vido-parts"
+CLUT=
+STAB=
+FILTER_BEFORE=
+FILTER_AFTER=
+# PROXY_MUX_PARAMS=(-c:v hevc_nvenc -b_ref_mode 0 -preset:v lossless -tune lossless -c:a pcm_s16le)
+PROXY_MUX_PARAMS=(-c:v dnxhd -profile:v dnxhr_hq -c:a pcm_s16le)
+CONCURRENCY=${CONCURRENCY:-4}
+SECTION=
+
+################################################################################
+
+input=${1:-Timeline}
 rm "$PROXY_DIR/"*".tmp" 2>/dev/null || :
 parts=()
 nw_files=()
 ex_files=("$PROXY_DIR/part-"*)
 
-processes=0
+sections=()
+section_ix=()
 
+processes=0
 lbl=0
+pids=()
+pids_info=()
+
+last_section=-1
+
 while read -r line; do
     line="$(echo "$line" | sed 's/#.*//')"
     if [ "$(echo "$line" | sed 's/ +//g')" = "" ];then
@@ -27,7 +85,7 @@ while read -r line; do
     fi
 
     if echo "$line" | grep -E '^\s*[_a-zA-Z0-9]+=' &>/dev/null; then
-        printf 'Assigning %s\n' "$(echo "$line" | cut -d= -f1)"
+        printf '\033[48;5;238m\033[38;5;255m      %-60s [VAR] \033[0m\n' "$(echo "$line" | cut -d= -f1)" >&2
         eval "$line"
         continue
     fi
@@ -36,7 +94,7 @@ while read -r line; do
     mkdir "$PROXY_DIR" 2>/dev/null || :
     part="$(echo "$line" | grep -Eo '^.*[0-9_:\.]+-[0-9_:\.]+')"
     usrf="$( echo "${line:${#part}}" | sed  -E 's/(^\s*)|(\s*$)//g')"
-    file="$(echo "$part" | rev | cut -d' ' -f2- | rev)"
+    file="$(echo "$part" | rev | cut -d' ' -f2- | rev | sed  -E 's/(^\s*)|(\s*$)//g')"
     time="$(echo "$part" | rev | cut -d ' ' -f1 | rev | sed 's/_/0/g')"
     from="$(echo "$time" | cut -d- -f1)"
     till="$(echo "$time" | cut -d- -f2)"
@@ -44,13 +102,18 @@ while read -r line; do
         till=""
     fi
 
-    prefix=(ffmpeg -hide_banner -nostdin -loglevel error -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6 -ss "$from")
+    prefix=(-ss "$from")
     if [ "$till" != "" ]; then
         prefix+=(-to "$till")
     fi
     prefix+=(-i "$file")
 
-    # outfile_prefix="$(printf '%s/%03d-' "$PROXY_DIR" $lbl)"
+    if [ "$last_section" != "$SECTION" ]; then
+        sections+=("$SECTION")
+        section_ix+=($(( lbl - 1 )))
+        last_section="$SECTION"
+    fi
+
     outfile_prefix="$(printf '%s/part-' "$PROXY_DIR")"
 
     hash_stab="$(echo "${prefix[*]}" | sha1sum - | cut -d' ' -f1)"
@@ -67,8 +130,7 @@ while read -r line; do
         filters+=("[main]vidstabtransform=$STAB:input=${outfile_stab}" "unsharp=5:5:0.8:3:3:0.4[main]")
     fi
     if [ "$CLUT" != "" ]; then
-        # TODO trilinear
-        filters+=("[main][1]haldclut=interp=nearest[main]")
+        filters+=("[main][1]haldclut=interp=trilinear[main]")
     fi
     if [ "$FILTER_AFTER" != "" ]; then
         filters+=("[main]${FILTER_AFTER}[main]")
@@ -85,18 +147,22 @@ while read -r line; do
     outfile_main="$(printf '%s%s.mov'  "$outfile_prefix" "$hash_main")"
 
     while [[ processes -ge CONCURRENCY ]]; do
-        wait -n
+        # exit code is irrelevant (see `help wait`)
+        wait -n || :
         processes=$((processes-1))
     done
 
     processes=$((processes+1))
-    { \
-        set -e;
+    {
         if [ "$STAB" != "" ] && [ ! -f "$outfile_stab" ]; then
-            printf '\033[1;30;43m %03d) %s [STAB] \033[0m\n' $lbl "$file"
+            printf '\033[1m\033[48;5;227m\033[38;5;232m %03d) %-60s [STB] \033[0m\n' $lbl "$file" >&2
             tmp="$outfile_stab.tmp";
-            "${prefix[@]}" -an -vf "vidstabdetect=result=$tmp" -f null - <&- && \
-            mv "$tmp" "$outfile_stab"; \
+            "${FFMPEG[@]}" "${prefix[@]}" \
+                -an \
+                -vf "vidstabdetect=result=$tmp" \
+                -f null \
+                - <&- || exit 1
+            mv "$tmp" "$outfile_stab"
         fi
 
         if [ "$CLUT" != "" ]; then
@@ -104,63 +170,88 @@ while read -r line; do
         fi
 
         if [ ! -f "$outfile_main" ]; then
-            printf '\033[1;30;43m %03d) %s [CONV] \033[0m\n' $lbl "$file"
+            printf '\033[1m\033[48;5;227m\033[38;5;232m %03d) %-60s [CNV] \033[0m\n' $lbl "$file" >&2
             tmp="$outfile_main.tmp"
 
-            "${prefix[@]}" \
+            "${FFMPEG[@]}" "${prefix[@]}" \
                 -stats \
                 -filter_complex "$filter_str" \
                 "${suffix[@]}" \
                 -f mov \
-                "$tmp" <&- && \
-                mv "$tmp" "$outfile_main"; \
+                "$tmp" <&- || exit 1
+            mv "$tmp" "$outfile_main"
         fi
 
-        printf '\033[1;30;42m %03d) %s [DONE] \033[0m\n' $lbl "$file"
+        printf '\033[1m\033[48;5;155m\033[38;5;232m %03d) %-60s [RDY] \033[0m\n' $lbl "$file" >&2
     } &
+    pids+=("$!")
+    pids_info+=("$(printf '\033[1m\033[48;5;203m\033[38;5;232m %03d) %-60s [ERR] \033[0m' $lbl "$file")")
 
     parts+=("$outfile_main")
     nw_files+=("$outfile_main" "$outfile_stab")
-done < Timeline
+done < "$input"
 
-wait
-
-for ex in "${ex_files[@]}"; do
-    if [ ! -f "$ex" ]; then
-        continue
+# we need separate waits to test every background jobs' exit code.
+errix=-1
+for ix in "${!pids[@]}"; do
+    if ! wait "${pids[$ix]}"; then
+        errix=$ix
     fi
-    found=0
-    for n in "${nw_files[@]}"; do
-        if [ "$n" == "$ex" ]; then
-            found=1
-            break
+done
+
+if [ $errix -ge 0 ]; then
+    echo -e "${pids_info[$errix]}" >&2
+    exit 1
+fi
+
+if [ $clean -eq 1 ]; then
+    for ex in "${ex_files[@]}"; do
+        if [ ! -f "$ex" ]; then
+            continue
+        fi
+        found=0
+        for n in "${nw_files[@]}"; do
+            if [ "$n" == "$ex" ]; then
+                found=1
+                break
+            fi
+        done
+
+        if [ $found -eq 0 ]; then
+            echo "removing '$ex'" >&2
+            rm "$ex"
         fi
     done
+fi
 
-    if [ $found -eq 0 ]; then
-        echo rm "$ex"
-    fi
+################################################################################
+
+echo "#! /bin/bash"
+
+for ix in "${!sections[@]}"; do
+    section_name="${sections[$ix]:-main-$(( ix + 1 ))}"
+    offset=${section_ix[$ix]}
+    end=${section_ix[$ix+1]:-${#parts}}
+    echo
+    echo "# Section $section_name"
+
+    cmd=(ffmpeg -loglevel error -stats -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
+    filter=""
+    lbl=0
+    for file in "${parts[@]:$offset:$end}"; do
+        cmd+=(-i "$file")
+        filter="${filter}[$lbl:v:0][$lbl:a:0]"
+        lbl=$(( lbl + 1 ))
+    done
+    filter="${filter}concat=n=${lbl}:v=1:a=1[v][a]"
+    cmd+=(-filter_complex "$filter" -map '[v]' -map '[a]' -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 16 -preset:v slow)
+
+    for p in "${cmd[@]}"; do
+        echo -n "$p "
+        if [ ${#p} -ne 0 ] && [ ${p:0:1} != "-" ]; then
+            echo "\\"
+            echo -n "    "
+        fi
+    done
+    echo "output-$section_name.mp4"
 done
-
-echo
-
-cmd=(ffmpeg -loglevel error -stats -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
-filter=""
-lbl=0
-for file in "${parts[@]}"; do
-    #for ((i = 0 ; i < lbl ; i++)); do
-    cmd+=(-i "$file")
-    filter="${filter}[$lbl:v:0][$lbl:a:0]"
-    lbl=$(( lbl + 1 ))
-done
-filter="${filter}concat=n=${lbl}:v=1:a=1[v][a]"
-cmd+=(-filter_complex "$filter" -map '[v]' -map '[a]' -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 24)
-
-for p in "${cmd[@]}"; do
-    echo -n "$p "
-    if [ ${#p} -ne 0 ] && [ ${p:0:1} != "-" ]; then
-        echo " \\"
-        echo -n "  "
-    fi
-done
-echo "out.mp4"
