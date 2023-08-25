@@ -23,18 +23,41 @@ codec_v_h264=(       -c:v h264                     -rc vbr -cq 12 -preset:v  slo
 codec_a_pcm=(        -c:a pcm_s16le                                                                        )
 codec_a_aac=(        -c:a aac                                                                              )
 
+# directory to store proxy files in.
 PROXY_DIR="./.vido-parts"
+
+# path to an haldclut image that is applied to each proxy file
 CLUT=
+
+# ffmpeg vidstabtransform options, no stabilization is performed if empty
 STAB=
+
+# The next proxy file will also get a hard link to ${PROXY_DIR}/part-${LABEL}.mov
+LABEL=
+
+# Applied to each proxy file before the proxy specific filters are applied
 FILTER_BEFORE=
+
+# Applied to each proxy file after the proxy specific filters are applied
 FILTER_AFTER=
+
+# Base ffmpeg command
 FFMPEG=(ffmpeg -hide_banner -nostdin -loglevel warning -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
-DISABLE=
-# PROXY_CODEC_PARAMS=(-c:v hevc_nvenc -b_ref_mode 0 -preset:v lossless -tune lossless -c:a pcm_s16le)
-PROXY_CODEC_PARAMS=("${codec_v_dnxhd_444[@]}" "${codec_a_pcm[@]}")
-OUTPUT_CODEC_PARAMS=("${codec_v_hevc_nvenc[@]}" "${codec_a_aac[@]}")
-CONCURRENCY=${CONCURRENCY:-4}
+
+# Sections a set of proxies into a single clip.
 SECTION=
+
+# If set to 1 the proxies after it are not created. (vido -c will not delete any disabled proxies)
+DISABLE=
+
+# The ffmpeg codec related params when generating the proxy files.
+PROXY_CODEC_PARAMS=("${codec_v_dnxhd_444[@]}" "${codec_a_pcm[@]}")
+
+# The ffmpeg codec related params for the final clip command.
+OUTPUT_CODEC_PARAMS=("${codec_v_hevc_nvenc[@]}" "${codec_a_aac[@]}")
+
+# Maximum amount of concurrent ffmpeg instances.
+CONCURRENCY=${CONCURRENCY:-4}
 
 ################################################################################
 
@@ -84,7 +107,8 @@ input=${1:-Timeline}
 rm "$PROXY_DIR/"*".tmp" 2>/dev/null || :
 parts=()
 nw_files=()
-ex_files=("$PROXY_DIR/part-"*)
+part_prefix="part-"
+ex_files=("$PROXY_DIR/$part_prefix"*)
 
 sections=()
 sections_enabled=()
@@ -97,23 +121,38 @@ pids_info=()
 
 last_section=-1
 
+linenr=0
+
+timerange_re='[0-9_:\.]+-[0-9_:\.]+'
+trimspace() {
+    sed -E 's/(^\s*)|(\s*$)//g'
+}
+
+file_pad="$(grep -Eo "^.*${timerange_re}" "$input" | rev | cut -d' ' -f2- | rev | trimspace | awk '{ if (length > max) max = length } END { print max }')"
+
 while read -r line; do
+    linenr=$(( linenr + 1 ))
     line="$(echo "$line" | sed 's/#.*//')"
     if [ "$(echo "$line" | sed 's/ +//g')" = "" ];then
         continue
     fi
 
     if echo "$line" | grep -E '^\s*[_a-zA-Z0-9]+=' &>/dev/null; then
-        printf '\033[48;5;238m\033[38;5;255m      %-91s [VAR] \033[0m\n' "$(echo "$line" | cut -d= -f1)" >&2
+        printf "\033[48;5;238m\033[38;5;255m      %-$(( file_pad+51 ))s [VAR] \033[0m\n" "$(echo "$line" | cut -d= -f1)" >&2
         eval "$line"
         continue
     fi
 
     lbl=$(( lbl + 1 ))
     mkdir "$PROXY_DIR" 2>/dev/null || :
-    part="$(echo "$line" | grep -Eo '^.*[0-9_:\.]+-[0-9_:\.]+')"
-    usrf="$( echo "${line:${#part}}" | sed  -E 's/(^\s*)|(\s*$)//g')"
-    file="$(echo "$part" | rev | cut -d' ' -f2- | rev | sed  -E 's/(^\s*)|(\s*$)//g')"
+    part="$(echo "$line" | grep -Eo "^.*${timerange_re}" || :)"
+    if [ "$part" = "" ]; then
+        printf "invalid line %d: '%s'\n" $linenr "$line" >&2
+        exit 1
+    fi
+
+    usrf="$(echo "${line:${#part}}" | trimspace)"
+    file="$(echo "$part" | rev | cut -d' ' -f2- | rev | trimspace)"
     time="$(echo "$part" | rev | cut -d ' ' -f1 | rev | sed 's/_/0/g')"
     from="$(echo "$time" | cut -d- -f1)"
     till="$(echo "$time" | cut -d- -f2)"
@@ -144,7 +183,7 @@ while read -r line; do
         last_section="$SECTION"
     fi
 
-    outfile_prefix="$(printf '%s/part-' "$PROXY_DIR")"
+    outfile_prefix="$(printf '%s/%s' "$PROXY_DIR" "$part_prefix")"
 
     hash_stab="$(echo "${prefix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_stab="$(printf '%s%s.stab' "$outfile_prefix" "$hash_stab")"
@@ -184,6 +223,8 @@ while read -r line; do
         processes=$((processes-1))
     done
 
+    label="$LABEL"
+    LABEL=
     processes=$((processes+1))
     {
         if [ $enabled -ne 1 ]; then
@@ -199,7 +240,7 @@ while read -r line; do
 
         err=0
         if [ "$STAB" != "" ] && [ ! -f "$outfile_stab" ]; then
-            printf '\033[1m\033[48;5;227m\033[38;5;232m %03d) %-40s %-50s [STB] \033[0m\n' $lbl "$file" "${outfile_stab:${#PROXY_DIR}+1}" >&2
+            printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [STB] \033[0m\n" $lbl "$file" "${outfile_stab:${#PROXY_DIR}+1}" >&2
             "${FFMPEG[@]}" -n "${prefix[@]}" \
                 -an \
                 -vf "vidstabdetect=result=$tmp_stab" \
@@ -222,12 +263,17 @@ while read -r line; do
         flock -x 9
 
         if [ ! -f "$outfile_main" ]; then
-            printf '\033[1m\033[48;5;227m\033[38;5;232m %03d) %-40s %-50s [CNV] \033[0m\n' $lbl "$file" "${outfile_main:${#PROXY_DIR}+1}" >&2
+            printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [CNV] \033[0m\n" $lbl "$file" "${outfile_main:${#PROXY_DIR}+1}" >&2
             "${FFMPEG[@]}" -n "${prefix[@]}" \
                 -filter_complex "$filter_str" \
                 "${suffix[@]}" \
                 -f mov \
                 "$tmp_main" <&- && mv "$tmp_main" "$outfile_main" || err=$?
+        fi
+
+        if [ "$label" != "" ]; then
+            ext="$(echo "$outfile_main" | rev | cut -d. -f1 | rev)"
+            ln "$outfile_main" "${PROXY_DIR}/${part_prefix}${label}.${ext}"
         fi
 
         rm "$lock_main" || :
@@ -237,10 +283,10 @@ while read -r line; do
             exit $err
         fi
 
-        printf '\033[1m\033[48;5;155m\033[38;5;232m %03d) %-40s %-50s [RDY] \033[0m\n' $lbl "$file" "${outfile_main:${#PROXY_DIR}+1}" >&2
+        printf "\033[48;5;155m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [RDY] \033[0m\n" $lbl "$file" "${outfile_main:${#PROXY_DIR}+1}" >&2
     } &
     pids+=("$!")
-    pids_info+=("$(printf '\033[1m\033[48;5;203m\033[38;5;232m %03d) %-91s [ERR] \033[0m' $lbl "$file")")
+    pids_info+=("$(printf "\033[48;5;203m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [ERR] \033[0m" $lbl "$file" "")")
 
     parts+=("$outfile_main")
     nw_files+=("$outfile_main" "$outfile_stab")
