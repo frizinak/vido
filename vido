@@ -2,7 +2,7 @@
 set -e
 
 usage () {
-    echo "Usage: $(basename "$0") [-crl] [-t seconds] <timeline-file>"
+    echo "Usage: $(basename "$0") [-crl] [-t seconds]"
     echo "    -c: also remove old proxy files"
     echo "    -r: use dnxhd (lossless) for the final videos"
     echo "    -l: use hevc  (lossy)    for the proxy videos"
@@ -13,15 +13,15 @@ usage () {
 
 ################################################################################
 
-codec_v_dnxhd_444=(  -c:v dnxhd                                   -profile:v dnxhr_444 -pix_fmt yuv444p10le)
-codec_v_dnxhd_hqx=(  -c:v dnxhd                                   -profile:v dnxhr_hqx -pix_fmt yuv422p    )
-codec_v_dnxhd_hq=(   -c:v dnxhd                                   -profile:v dnxhr_hq  -pix_fmt yuv422p    )
-codec_v_hevc_nvenc=( -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 16 -preset:v  slow      -pix_fmt yuv420p    )
-codec_v_h264_nvenc=( -c:v h264_nvenc               -rc vbr -cq 12 -preset:v  slow      -pix_fmt yuv420p    )
-codec_v_hevc=(       -c:v hevc                     -rc vbr -cq 16 -preset:v  slow                          )
-codec_v_h264=(       -c:v h264                     -rc vbr -cq 12 -preset:v  slow                          )
-codec_a_pcm=(        -c:a pcm_s16le                                                                        )
-codec_a_aac=(        -c:a aac                                                                              )
+codec_v_dnxhd_444=(  -c:v dnxhd                                   -profile:v dnxhr_444 -pix_fmt yuv444p10le                              )
+codec_v_dnxhd_hqx=(  -c:v dnxhd                                   -profile:v dnxhr_hqx -pix_fmt yuv422p                                  )
+codec_v_dnxhd_hq=(   -c:v dnxhd                                   -profile:v dnxhr_hq  -pix_fmt yuv422p                                  )
+codec_v_hevc_nvenc=( -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 16 -preset:v  slow      -pix_fmt yuv420p                                  )
+codec_v_h264_nvenc=( -c:v h264_nvenc               -rc vbr -cq 12 -preset:v  slow      -pix_fmt yuv420p                                  )
+codec_v_hevc=(       -c:v hevc                     -rc vbr -cq 16 -preset:v  slow                           -x265-params 'log-level=none')
+codec_v_h264=(       -c:v h264                     -rc vbr -cq 12 -preset:v  slow                                                        )
+codec_a_pcm=(        -c:a pcm_s16le                                                                                                      )
+codec_a_aac=(        -c:a aac                                                                                                            )
 
 # directory to store proxy files in.
 PROXY_DIR="./.vido-parts"
@@ -58,6 +58,14 @@ OUTPUT_CODEC_PARAMS=("${codec_v_hevc_nvenc[@]}" "${codec_a_aac[@]}")
 
 # Maximum amount of concurrent ffmpeg instances.
 CONCURRENCY=${CONCURRENCY:-4}
+
+################################################################################
+
+conf="${XDG_CONFIG_HOME:-"$HOME/.config"}/vido/defaults"
+
+if [ -f "$conf" ]; then
+    source "$conf"
+fi
 
 ################################################################################
 
@@ -103,7 +111,9 @@ shift "$((OPTIND -1))"
 
 ################################################################################
 
-input=${1:-Timeline}
+#input=${1:-Timeline}
+
+input=Timeline
 rm "$PROXY_DIR/"*".tmp" 2>/dev/null || :
 parts=()
 nw_files=()
@@ -166,6 +176,13 @@ while read -r line; do
     fi
     if [ "$debug_seconds" != "" ]; then
         till=
+    fi
+
+    if [ "${file:0:5}" = "CLIP_" ]; then
+        rf="${!file}"
+        if [ "$rf" != "" ]; then
+            file="$rf"
+        fi
     fi
 
     novideo=0
@@ -256,7 +273,7 @@ while read -r line; do
     outfile_label=
     if [ "$LABEL" != "" ]; then
         ext="$(echo "$outfile_main" | rev | cut -d. -f1 | rev)"
-        outfile_label="${PROXY_DIR}/${part_prefix}${LABEL}.${ext}"
+        outfile_label="${PROXY_DIR}/${LABEL}.${ext}"
     fi
     LABEL=
     processes=$((processes+1))
