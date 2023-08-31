@@ -36,10 +36,12 @@ STAB=
 LABEL=
 
 # Applied to each proxy file before the proxy specific filters are applied
-FILTER_BEFORE=
+FILTER_V_BEFORE=
+FILTER_A_BEFORE=
 
 # Applied to each proxy file after the proxy specific filters are applied
-FILTER_AFTER=
+FILTER_V_AFTER=
+FILTER_A_AFTER=
 
 # Base ffmpeg command
 FFMPEG=(ffmpeg -hide_banner -nostdin -loglevel error -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
@@ -51,10 +53,12 @@ SECTION=
 DISABLED=
 
 # The ffmpeg codec related params when generating the proxy files.
-PROXY_CODEC_PARAMS=("${codec_v_dnxhd_444[@]}" "${codec_a_pcm[@]}")
+PROXY_CODEC_V_PARAMS=("${codec_v_dnxhd_444[@]}")
+PROXY_CODEC_A_PARAMS=("${codec_a_pcm[@]}")
 
 # The ffmpeg codec related params for the final clip command.
-OUTPUT_CODEC_PARAMS=("${codec_v_hevc_nvenc[@]}" "${codec_a_aac[@]}")
+OUTPUT_CODEC_V_PARAMS=("${codec_v_hevc_nvenc[@]}")
+OUTPUT_CODEC_A_PARAMS=("${codec_a_aac[@]}")
 
 # Maximum amount of concurrent ffmpeg instances.
 CONCURRENCY=${CONCURRENCY:-4}
@@ -77,11 +81,13 @@ while getopts ':crlt:h' o; do
             clean=1
             ;;
         r)
-            OUTPUT_CODEC_PARAMS=("${codec_v_dnxhd_444[@]}" "${codec_a_pcm[@]}")
+            OUTPUT_CODEC_V_PARAMS=("${codec_v_dnxhd_444[@]}")
+            OUTPUT_CODEC_A_PARAMS=("${codec_a_pcm[@]}")
             ;;
         l)
             PROXY_DIR="./.vido-parts-lossy"
-            PROXY_CODEC_PARAMS=("${codec_v_hevc_nvenc[@]}" "${codec_a_aac[@]}")
+            PROXY_CODEC_V_PARAMS=("${codec_v_hevc_nvenc[@]}")
+            PROXY_CODEC_A_PARAMS=("${codec_a_aac[@]}")
             ;;
         t)
             debug_seconds="$OPTARG"
@@ -166,7 +172,7 @@ while read -r line; do
     fi
 
     usrf="$(echo "${line:${#part}}" | trimspace)"
-    strm="$(echo "${part}" | grep -Eo '^[ va]+ ' | trimspace || :)"
+    strm="$(echo "${part}" | grep -Eo '^[ VA]+ ' | trimspace || :)"
     file="$(echo "${part:${#strm}}" | rev | cut -d' ' -f2- | rev | trimspace)"
     time="$(echo "${part:${#strm}}" | rev | cut -d ' ' -f1 | rev | sed 's/_/0/g')"
     from="$(echo "$time" | cut -d- -f1)"
@@ -178,8 +184,11 @@ while read -r line; do
         till=
     fi
 
-    if [ "${file:0:5}" = "CLIP_" ]; then
-        rf="${!file}"
+    file_alias="$file"
+    if [ "${file:0:6}" = '$CLIP_' ]; then
+        var=${file:1}
+        file_alias="$var"
+        rf="${!var}"
         if [ "$rf" != "" ]; then
             file="$rf"
         fi
@@ -188,16 +197,41 @@ while read -r line; do
     novideo=0
     noaudio=0
     if [ ${#strm} -eq 0 ]; then
-        strm='va'
+        strm='VA'
     fi
-    if ! echo "$strm" | grep 'v' &>/dev/null; then
+    if ! echo "$strm" | grep 'V' &>/dev/null; then
         novideo=1
     fi
-    if ! echo "$strm" | grep 'a' &>/dev/null; then
+    if ! echo "$strm" | grep 'A' &>/dev/null; then
         noaudio=1
     fi
 
     streams+=("$strm")
+
+    usrf_v=
+    usrf_a=
+    usrf_var=usrf_v
+    if [ $novideo -eq 1 ]; then
+        usrf_var=usrf_a
+    fi
+
+    for (( i = 0; i < ${#usrf}; ++i)); do
+        if [ "${usrf:$i:2}" = "V:" ]; then
+            usrf_var=usrf_v
+            i=$(( i + 1))
+            continue
+        fi
+        if [ "${usrf:$i:2}" = "A:" ]; then
+            usrf_var=usrf_a
+            i=$(( i + 1))
+            continue
+        fi
+        c="${usrf:$i:1}"
+        declare $usrf_var="${!usrf_var}$c"
+    done
+
+    usrf_v="$(echo "$usrf_v" | trimspace)"
+    usrf_a="$(echo "$usrf_a" | trimspace)"
 
     prefix=(-ss "$from")
     if [ "$till" != "" ]; then
@@ -224,44 +258,64 @@ while read -r line; do
     hash_stab="$(echo "${prefix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_stab="$(printf '%s%s.stab' "$outfile_prefix" "$hash_stab")"
 
-    filters=()
-    if [ "$novideo" != "1" ]; then
-        if [ "$FILTER_BEFORE" != "" ]; then
-            filters+=("[main]${FILTER_BEFORE}[main]")
+    filters_v=()
+    filters_a=()
+    if [ $novideo -ne 1 ]; then
+        if [ "$FILTER_V_BEFORE" != "" ]; then
+            filters_v+=("[video]${FILTER_V_BEFORE}[video]")
         fi
         if [ "$STAB" != "" ]; then
-            filters+=("[main]vidstabtransform=$STAB:input=${outfile_stab}" "unsharp=5:5:0.8:3:3:0.4[main]")
+            filters_v+=("[video]vidstabtransform=$STAB:input=${outfile_stab}" "unsharp=5:5:0.8:3:3:0.4[video]")
         fi
-        if [ "$usrf" != "" ]; then
-            filters+=("[main]${usrf}[main]")
+        if [ "$usrf_v" != "" ]; then
+            filters_v+=("[video]${usrf_v}[video]")
         fi
         if [ "$CLUT" != "" ]; then
-            filters+=("[main][1]haldclut=interp=trilinear[main]")
+            filters_v+=("[video][1]haldclut=interp=trilinear[video]")
         fi
-        if [ "$FILTER_AFTER" != "" ]; then
-            filters+=("[main]${FILTER_AFTER}[main]")
+        if [ "$FILTER_V_AFTER" != "" ]; then
+            filters_v+=("[video]${FILTER_V_AFTER}[video]")
         fi
-        if [ ${#filters[@]} = 0 ]; then
-            filters=("[main]null[main]")
+        if [ ${#filters_v[@]} = 0 ]; then
+            filters_v=("[video]null[video]")
         fi
-        filters[0]="$(echo "${filters[0]}" | sed 's/\[main\]/[0]/')"
+        filters_v[0]="$(echo "${filters_v[0]}" | sed 's/\[video\]/[0]/')"
+    fi
+    if [ $noaudio -ne 1 ]; then
+        if [ "$FILTER_A_BEFORE" != "" ]; then
+            filters_a+=("[audio]${FILTER_A_BEFORE}[audio]")
+        fi
+        if [ "$usrf_a" != "" ]; then
+            filters_a+=("[audio]${usrf_a}[audio]")
+        fi
+        if [ "$FILTER_A_AFTER" != "" ]; then
+            filters_a+=("[audio]${FILTER_A_AFTER}[audio]")
+        fi
+        if [ ${#filters_a[@]} = 0 ]; then
+            filters_a=("[audio]anull[audio]")
+        fi
+        filters_a[0]="$(echo "${filters_a[0]}" | sed 's/\[audio\]/[0]/')"
     fi
 
-    suffix=("${PROXY_CODEC_PARAMS[@]}")
-    if [ "$novideo" != "1" ]; then
-        suffix+=(-map '[main]')
+    suffix=("${PROXY_CODEC_V_PARAMS[@]}" "${PROXY_CODEC_A_PARAMS[@]}")
+    if [ $novideo -ne 1 ]; then
+        suffix+=(-map '[video]')
     fi
-    if [ "$noaudio" != "1" ]; then
-        suffix+=(-map '0:a')
+    if [ $noaudio -ne 1 ]; then
+        suffix+=(-map '[audio]')
     fi
 
-    filter_str="$(IFS=,; echo "${filters[*]}")"
+    filters_v_str="$(IFS=,; echo "${filters_v[*]}")"
+    filters_a_str="$(IFS=,; echo "${filters_a[*]}")"
     filter_arg=()
-    if [ "$filter_str" != "" ]; then
-        filter_arg=(-filter_complex "$filter_str")
+    if [ "$filters_v_str" != "" ]; then
+        filter_arg+=(-filter_complex:v "$filters_v_str")
+    fi
+    if [ "$filters_a_str" != "" ]; then
+        filter_arg+=(-filter_complex:a "$filters_a_str")
     fi
 
-    hash_main="$(echo "${prefix[*]} $CLUT $filter_str ${suffix[*]}" | sha1sum - | cut -d' ' -f1)"
+    hash_main="$(echo "${prefix[*]} $CLUT $filters_v_str $filters_a_str ${suffix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_main="$(printf '%s%s.mov'  "$outfile_prefix" "$hash_main")"
 
     while [[ processes -ge CONCURRENCY ]]; do
@@ -290,8 +344,8 @@ while read -r line; do
         flock -x 9
 
         err=0
-        if [ "$novideo" != "1" ] && [ "$STAB" != "" ] && [ ! -f "$outfile_stab" ]; then
-            printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [STB] \033[0m\n" $lbl "$file" "${outfile_stab:${#PROXY_DIR}+1}" >&2
+        if [ $novideo -ne 1 ] && [ "$STAB" != "" ] && [ ! -f "$outfile_stab" ]; then
+            printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [STB] \033[0m\n" $lbl "$file_alias" "${outfile_stab:${#PROXY_DIR}+1}" >&2
             "${FFMPEG[@]}" -n "${prefix[@]}" \
                 -an \
                 -vf "vidstabdetect=result=$tmp_stab" \
@@ -314,7 +368,7 @@ while read -r line; do
         flock -x 9
 
         if [ ! -f "$outfile_main" ]; then
-            printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [CNV] \033[0m\n" $lbl "$file" "${outfile_main:${#PROXY_DIR}+1}" >&2
+            printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [CNV] \033[0m\n" $lbl "$file_alias" "${outfile_main:${#PROXY_DIR}+1}" >&2
             "${FFMPEG[@]}" -n "${prefix[@]}" \
                 "${filter_arg[@]}" \
                 "${suffix[@]}" \
@@ -333,10 +387,10 @@ while read -r line; do
             exit $err
         fi
 
-        printf "\033[48;5;155m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [RDY] \033[0m\n" $lbl "$file" "${outfile_main:${#PROXY_DIR}+1}" >&2
+        printf "\033[48;5;155m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [RDY] \033[0m\n" $lbl "$file_alias" "${outfile_main:${#PROXY_DIR}+1}" >&2
     } &
     pids+=("$!")
-    pids_info+=("$(printf "\033[48;5;203m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [ERR] \033[0m" $lbl "$file" "")")
+    pids_info+=("$(printf "\033[48;5;203m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [ERR] \033[0m" $lbl "$file_alias" "")")
 
     parts+=("$outfile_main")
     nw_files+=("$outfile_main" "$outfile_stab")
@@ -396,19 +450,19 @@ for ix in "${!sections[@]}"; do
     filter=""
     lbl=0
     suboffset=$offset
-    hasaudio=
-    hasvideo=
+    hasaudio=0
+    hasvideo=0
     stream_count=0
     for file in "${parts[@]:$offset:$end}"; do
         strm="${streams[$suboffset]}"
 
         cmd+=(-i "$file")
-        if echo "$strm" | grep 'v' &>/dev/null; then
+        if echo "$strm" | grep 'V' &>/dev/null; then
             stream_count=$(( stream_count + 1 ))
             hasvideo=1
             filter="${filter}[$lbl:v]"
         fi
-        if echo "$strm" | grep 'a' &>/dev/null; then
+        if echo "$strm" | grep 'A' &>/dev/null; then
             stream_count=$(( stream_count + 1 ))
             hasaudio=1
             filter="${filter}[$lbl:a]"
@@ -431,7 +485,7 @@ for ix in "${!sections[@]}"; do
     if [ $hasaudio -eq 1 ]; then
         cmd+=(-map '[a]')
     fi
-    cmd+=("${OUTPUT_CODEC_PARAMS[@]}")
+    cmd+=("${OUTPUT_CODEC_V_PARAMS[@]}" "${OUTPUT_CODEC_A_PARAMS[@]}")
 
     for p in "${cmd[@]}"; do
         echo -n "$p "
