@@ -242,6 +242,8 @@ while read -r line; do
     fi
     prefix+=(-i "$file")
 
+    stat="$(stat -c %s "$file" || :)"
+
     enabled=1
     if [ "$DISABLED" == "1" ]; then
         enabled=0
@@ -255,7 +257,7 @@ while read -r line; do
 
     outfile_prefix="$(printf '%s/%s' "$PROXY_DIR" "$part_prefix")"
 
-    hash_stab="$(echo "${prefix[*]}" | sha1sum - | cut -d' ' -f1)"
+    hash_stab="$(echo "${stat} ${prefix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_stab="$(printf '%s%s.stab' "$outfile_prefix" "$hash_stab")"
 
     filters_v=()
@@ -315,7 +317,7 @@ while read -r line; do
         filter_arg+=(-filter_complex:a "$filters_a_str")
     fi
 
-    hash_main="$(echo "${prefix[*]} $CLUT $filters_v_str $filters_a_str ${suffix[*]}" | sha1sum - | cut -d' ' -f1)"
+    hash_main="$(echo "${stat} ${prefix[*]} $CLUT $filters_v_str $filters_a_str ${suffix[*]}" | sha1sum - | cut -d' ' -f1)"
     outfile_main="$(printf '%s%s.mov'  "$outfile_prefix" "$hash_main")"
 
     while [[ processes -ge CONCURRENCY ]]; do
