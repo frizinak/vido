@@ -13,15 +13,15 @@ usage () {
 
 ################################################################################
 
-codec_v_dnxhd_444=(  -c:v dnxhd                                   -profile:v dnxhr_444 -pix_fmt yuv444p10le                              )
-codec_v_dnxhd_hqx=(  -c:v dnxhd                                   -profile:v dnxhr_hqx -pix_fmt yuv422p                                  )
-codec_v_dnxhd_hq=(   -c:v dnxhd                                   -profile:v dnxhr_hq  -pix_fmt yuv422p                                  )
-codec_v_hevc_nvenc=( -c:v hevc_nvenc -b_ref_mode 0 -rc vbr -cq 16 -preset:v  slow      -pix_fmt yuv420p                                  )
-codec_v_h264_nvenc=( -c:v h264_nvenc               -rc vbr -cq 12 -preset:v  slow      -pix_fmt yuv420p                                  )
-codec_v_hevc=(       -c:v hevc                     -rc vbr -cq 16 -preset:v  slow                           -x265-params 'log-level=none')
-codec_v_h264=(       -c:v h264                     -rc vbr -cq 12 -preset:v  slow                                                        )
-codec_a_pcm=(        -c:a pcm_s16le                                                                                                      )
-codec_a_aac=(        -c:a aac                                                                                                            )
+codec_v_dnxhd_444=(  -c:v dnxhd                                       -profile:v dnxhr_444 -pix_fmt yuv444p10le                              )
+codec_v_dnxhd_hqx=(  -c:v dnxhd                                       -profile:v dnxhr_hqx -pix_fmt yuv422p                                  )
+codec_v_dnxhd_hq=(   -c:v dnxhd                                       -profile:v dnxhr_hq  -pix_fmt yuv422p                                  )
+codec_v_hevc_nvenc=( -c:v hevc_nvenc -b_ref_mode 0 -rc constqp -qp 32 -preset:v  slow      -pix_fmt yuv420p                                  )
+codec_v_h264_nvenc=( -c:v h264_nvenc               -rc constqp -qp 24 -preset:v  slow      -pix_fmt yuv420p                                  )
+codec_v_hevc=(       -c:v hevc       -b_ref_mode 0 -rc vbr     -cq 16 -preset:v  slow      -pix_fmt yuv420p     -x265-params 'log-level=none')
+codec_v_h264=(       -c:v h264                     -rc vbr     -cq 12 -preset:v  slow      -pix_fmt yuv420p                                  )
+codec_a_pcm=(        -c:a pcm_s16le                                                                                                          )
+codec_a_aac=(        -c:a aac                                                                                                                )
 
 # directory to store proxy files in.
 PROXY_DIR="./.vido-parts"
