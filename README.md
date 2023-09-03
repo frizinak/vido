@@ -2,11 +2,11 @@
 
 Simple video / timeline editor.
 
-- Each proxy is stored in .vido-parts/part-<hash>.mov (lossless by default, but configurable)
+- Each proxy is stored in .vido-parts/part-&lt;hash&gt;.mov (lossless by default, but configurable)
   so editing can be done incrementally.
 - Capture audio / video or both from the given cut.
 - Apply ffmpeg filters.
-- Multiple outputs (SECTION=<name>)
+- Multiple outputs (SECTION=&lt;name&gt;)
 - ...
 
 ## Documentation / Usage
