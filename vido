@@ -472,7 +472,7 @@ for ix in "${!sections[@]}"; do
         lbl=$(( lbl + 1 ))
         suboffset=$(( suboffset + 1 ))
     done
-    filter="${filter}concat=n=$(( stream_count / 2 )):v=${hasvideo}:a=${hasaudio}"
+    filter="${filter}concat=n=$(( ( stream_count + 1 ) / 2 )):v=${hasvideo}:a=${hasaudio}"
     if [ $hasvideo -eq 1 ]; then
         filter="${filter}[v]"
     fi
