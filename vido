@@ -143,7 +143,7 @@ noaudio=
 novideo=
 streams=()
 
-timerange_re='[0-9_:\.]+-[0-9_:\.]+'
+timerange_re='[0-9_:\.]+[-+][0-9_:\.]+'
 trimspace() {
     sed -E 's/(^\s*)|(\s*$)//g'
 }
@@ -165,7 +165,7 @@ while read -r line; do
 
     lbl=$(( lbl + 1 ))
     mkdir "$PROXY_DIR" 2>/dev/null || :
-    part="$(echo "$line" | grep -Eo "^.*${timerange_re}" || :)"
+    part="$(echo "$line" | grep -Eo "^.* ${timerange_re}" || :)"
     if [ "$part" = "" ]; then
         printf "invalid line %d: '%s'\n" $linenr "$line" >&2
         exit 1
@@ -175,8 +175,9 @@ while read -r line; do
     strm="$(echo "${part}" | grep -Eo '^[ VA]+ ' | trimspace || :)"
     file="$(echo "${part:${#strm}}" | rev | cut -d' ' -f2- | rev | trimspace)"
     time="$(echo "${part:${#strm}}" | rev | cut -d ' ' -f1 | rev | sed 's/_/0/g')"
-    from="$(echo "$time" | cut -d- -f1)"
-    till="$(echo "$time" | cut -d- -f2)"
+    drtn="$(echo "$time" | grep '+' || :)"
+    from="$(echo "$time" | sed 's/[-+].*//')"
+    till="$(echo "$time" | sed 's/.*[-+]//')"
     if [ "$(echo "$till" | sed 's/[0_:\.]\+//g')" = "" ]; then
         till=
     fi
@@ -235,7 +236,11 @@ while read -r line; do
 
     prefix=(-ss "$from")
     if [ "$till" != "" ]; then
-        prefix+=(-to "$till")
+        f='-to'
+        if [ "$drtn" != "" ]; then
+            f='-t'
+        fi
+        prefix+=("$f" "$till")
     fi
     if [ "$debug_seconds" != "" ]; then
         prefix+=(-t "$debug_seconds")
@@ -329,7 +334,7 @@ while read -r line; do
     outfile_label=
     if [ "$LABEL" != "" ]; then
         ext="$(echo "$outfile_main" | rev | cut -d. -f1 | rev)"
-        outfile_label="${PROXY_DIR}/${LABEL}.${ext}"
+        outfile_label="${PROXY_DIR}/${part_prefix}${LABEL}.${ext}"
     fi
     LABEL=
     processes=$((processes+1))
@@ -444,7 +449,8 @@ for ix in "${!sections[@]}"; do
 
     section_name="${sections[$ix]:-main-$(( ix + 1 ))}"
     offset=${section_ix[$ix]}
-    end=${section_ix[$ix+1]:-${#parts}}
+    end=${section_ix[$ix+1]:-${#parts[@]}}
+
     echo
     echo "# Section $section_name"
 
