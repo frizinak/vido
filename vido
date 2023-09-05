@@ -272,11 +272,11 @@ while read -r line; do
         if [ "$usrf_v" != "" ]; then
             filters_v+=("[video]${usrf_v}[video]")
         fi
-        if [ "$CLUT" != "" ]; then
-            filters_v+=("[video][1]haldclut=interp=trilinear[video]")
-        fi
         if [ "$FILTER_V_AFTER" != "" ]; then
             filters_v+=("[video]${FILTER_V_AFTER}[video]")
+        fi
+        if [ "$CLUT" != "" ]; then
+            filters_v+=("[video][1]haldclut=interp=trilinear[video]")
         fi
         if [ ${#filters_v[@]} = 0 ]; then
             filters_v=("[video]null[video]")
