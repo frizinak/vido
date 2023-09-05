@@ -455,7 +455,7 @@ for ix in "${!sections[@]}"; do
     hasaudio=0
     hasvideo=0
     stream_count=0
-    for file in "${parts[@]:$offset:$end}"; do
+    for file in "${parts[@]:$offset:$((end-offset))}"; do
         strm="${streams[$suboffset]}"
 
         cmd+=(-i "$file")
