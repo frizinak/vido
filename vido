@@ -460,25 +460,26 @@ for ix in "${!sections[@]}"; do
     suboffset=$offset
     hasaudio=0
     hasvideo=0
-    stream_count=0
+    video_count=0
+    audio_count=0
     for file in "${parts[@]:$offset:$((end-offset))}"; do
         strm="${streams[$suboffset]}"
 
         cmd+=(-i "$file")
         if echo "$strm" | grep 'V' &>/dev/null; then
-            stream_count=$(( stream_count + 1 ))
+            video_count=$(( video_count + 1 ))
             hasvideo=1
             filter="${filter}[$lbl:v]"
         fi
         if echo "$strm" | grep 'A' &>/dev/null; then
-            stream_count=$(( stream_count + 1 ))
+            audio_count=$(( audio_count + 1 ))
             hasaudio=1
             filter="${filter}[$lbl:a]"
         fi
         lbl=$(( lbl + 1 ))
         suboffset=$(( suboffset + 1 ))
     done
-    filter="${filter}concat=n=$(( ( stream_count + 1 ) / 2 )):v=${hasvideo}:a=${hasaudio}"
+    filter="${filter}concat=n=$(( ( video_count + audio_count - 1 + hasvideo + hasaudio ) / ( hasvideo + hasaudio ) )):v=${hasvideo}:a=${hasaudio}"
     if [ $hasvideo -eq 1 ]; then
         filter="${filter}[v]"
     fi
