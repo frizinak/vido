@@ -379,7 +379,7 @@ while read -r line; do
             "${FFMPEG[@]}" -nostdin -n "${prefix[@]}" \
                 "${filter_arg[@]}" \
                 "${suffix[@]}" \
-                -f mov \
+                -f mov -movflags faststart \
                 "$tmp_main" <&- && mv "$tmp_main" "$outfile_main" || err=$?
         fi
 
@@ -493,7 +493,7 @@ for ix in "${!sections[@]}"; do
     if [ $hasaudio -eq 1 ]; then
         cmd+=(-map '[a]')
     fi
-    cmd+=("${OUTPUT_CODEC_V_PARAMS[@]}" "${OUTPUT_CODEC_A_PARAMS[@]}" -stats)
+    cmd+=("${OUTPUT_CODEC_V_PARAMS[@]}" "${OUTPUT_CODEC_A_PARAMS[@]}" -f mov -movflags faststart -stats -shortest)
 
     for p in "${cmd[@]}"; do
         echo -n "$p "
