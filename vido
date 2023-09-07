@@ -44,7 +44,7 @@ FILTER_V_AFTER=
 FILTER_A_AFTER=
 
 # Base ffmpeg command
-FFMPEG=(ffmpeg -hide_banner -loglevel error -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
+FFMPEG=(ffmpeg -hide_banner -loglevel error -hwaccel:v auto)
 
 # Sections a set of proxies into a single clip.
 SECTION=
