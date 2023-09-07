@@ -44,7 +44,7 @@ FILTER_V_AFTER=
 FILTER_A_AFTER=
 
 # Base ffmpeg command
-FFMPEG=(ffmpeg -hide_banner -nostdin -loglevel error -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
+FFMPEG=(ffmpeg -hide_banner -loglevel error -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
 
 # Sections a set of proxies into a single clip.
 SECTION=
@@ -353,7 +353,7 @@ while read -r line; do
         err=0
         if [ $novideo -ne 1 ] && [ "$STAB" != "" ] && [ ! -f "$outfile_stab" ]; then
             printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [STB] \033[0m\n" $lbl "$file_alias" "${outfile_stab:${#PROXY_DIR}+1}" >&2
-            "${FFMPEG[@]}" -n "${prefix[@]}" \
+            "${FFMPEG[@]}" -nostdin -n "${prefix[@]}" \
                 -an \
                 -vf "vidstabdetect=result=$tmp_stab" \
                 -f null \
@@ -376,7 +376,7 @@ while read -r line; do
 
         if [ ! -f "$outfile_main" ]; then
             printf "\033[48;5;227m\033[38;5;232m %03d) \033[1m%-${file_pad}s \033[22m%-50s [CNV] \033[0m\n" $lbl "$file_alias" "${outfile_main:${#PROXY_DIR}+1}" >&2
-            "${FFMPEG[@]}" -n "${prefix[@]}" \
+            "${FFMPEG[@]}" -nostdin -n "${prefix[@]}" \
                 "${filter_arg[@]}" \
                 "${suffix[@]}" \
                 -f mov \
@@ -454,7 +454,7 @@ for ix in "${!sections[@]}"; do
     echo
     echo "# Section $section_name"
 
-    cmd=(ffmpeg -loglevel error -stats -hwaccel:v auto -filter_complex_threads 6 -filter_threads 6)
+    cmd=("${FFMPEG[@]}")
     filter=""
     lbl=0
     suboffset=$offset
@@ -493,7 +493,7 @@ for ix in "${!sections[@]}"; do
     if [ $hasaudio -eq 1 ]; then
         cmd+=(-map '[a]')
     fi
-    cmd+=("${OUTPUT_CODEC_V_PARAMS[@]}" "${OUTPUT_CODEC_A_PARAMS[@]}")
+    cmd+=("${OUTPUT_CODEC_V_PARAMS[@]}" "${OUTPUT_CODEC_A_PARAMS[@]}" -stats)
 
     for p in "${cmd[@]}"; do
         echo -n "$p "
